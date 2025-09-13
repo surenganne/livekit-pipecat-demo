@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiveKit + Pipecat Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f8f9fa;
+            min-height: 100vh;
+            padding: 2rem;
+            color: #333;
+        }
+
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 800px;
+            margin: 0 auto;
+            border: 1px solid #e9ecef;
+        }
+
+        h1 {
+            color: #4a5568;
+            margin-bottom: 0.5rem;
+            font-size: 2rem;
+        }
+
+        .subtitle {
+            color: #718096;
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+        }
+
+        .status {
+            padding: 1rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+            font-weight: 500;
+        }
+
+        .status.disconnected {
+            background: #fed7d7;
+            color: #c53030;
+        }
+
+        .status.connecting {
+            background: #fef5e7;
+            color: #d69e2e;
+        }
+
+        .status.connected {
+            background: #c6f6d5;
+            color: #38a169;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin: 2rem 0;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            min-width: 120px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-primary {
+            background: #4299e1;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #f56565;
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #a0aec0;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ed8936;
+            color: white;
+        }
+
+
+        .latency-info {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+
+        .latency-info h3 {
+            color: #4a5568;
+            margin-bottom: 0.5rem;
+        }
+
+        .latency-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #4299e1;
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            color: #718096;
+        }
+
+        .logs {
+            background: #1a202c;
+            color: #e2e8f0;
+            border-radius: 10px;
+            padding: 1rem;
+            margin: 1rem 0;
+            max-height: 200px;
+            overflow-y: auto;
+            text-align: left;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.875rem;
+        }
+
+        .log-entry {
+            margin-bottom: 0.25rem;
+        }
+
+        .log-timestamp {
+            color: #a0aec0;
+        }
+
+        @media (max-width: 640px) {
+            .controls {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            button {
+                width: 100%;
+                max-width: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ LiveKit + Pipecat Demo</h1>
+        <p class="subtitle">Real-time voice conversation with AI agent</p>
+        
+        <div id="status" class="status disconnected">
+            Disconnected - Click "Join Room" to start
+        </div>
+
+        <div class="controls">
+            <button id="joinBtn" class="btn-primary">Join Room</button>
+            <button id="leaveBtn" class="btn-danger" disabled>Leave Room</button>
+        </div>
+
+
+        <div class="latency-info">
+            <h3>📊 Performance Metrics</h3>
+            <div class="latency-stats">
+                <div class="stat">
+                    <div id="latencyValue" class="stat-value">--</div>
+                    <div class="stat-label">Current (ms)</div>
+                </div>
+                <div class="stat">
+                    <div id="measurementCount" class="stat-value">0</div>
+                    <div class="stat-label">Measurements</div>
+                </div>
+                <div class="stat">
+                    <div id="connectionQuality" class="stat-value">--</div>
+                    <div class="stat-label">Quality</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="logs" id="logs">
+            <div class="log-entry">
+                <span class="log-timestamp">[Ready]</span> Waiting to connect...
+            </div>
+        </div>
+    </div>
+
+    <!-- LiveKit SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.7/dist/livekit-client.umd.js"></script>
+
+    <!-- Our client code -->
+    <script src="client.js"></script>
+    <script src="latency-test.js"></script>
+</body>
+</html>

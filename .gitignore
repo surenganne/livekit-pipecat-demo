@@ -1,0 +1,36 @@
+# Environment variables (contains API keys)
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# Logs
+*.log
+agent/agent.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Process IDs (from deploy.sh)
+*.pid
+
+# Docker
+.dockerignore
+
+# Backup files
+*.backup

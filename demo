@@ -1,0 +1,54 @@
+#!/bin/bash
+
+# LiveKit + Pipecat Demo - Unified Control Script
+# This is a simple wrapper around the Python service manager
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_SCRIPT="$SCRIPT_DIR/service-manager.py"
+
+# Check if Python script exists
+if [ ! -f "$PYTHON_SCRIPT" ]; then
+    echo "❌ Service manager not found at $PYTHON_SCRIPT"
+    exit 1
+fi
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+case "${1:-start}" in
+    "start")
+        echo -e "${GREEN}🚀 Starting LiveKit + Pipecat Demo${NC}"
+        python3 "$PYTHON_SCRIPT" start
+        ;;
+    "stop")
+        echo -e "${YELLOW}🛑 Stopping LiveKit + Pipecat Demo${NC}"
+        python3 "$PYTHON_SCRIPT" stop
+        ;;
+    "restart")
+        echo -e "${YELLOW}🔄 Restarting LiveKit + Pipecat Demo${NC}"
+        python3 "$PYTHON_SCRIPT" restart
+        ;;
+    "status")
+        python3 "$PYTHON_SCRIPT" status
+        ;;
+    "logs")
+        echo -e "${GREEN}📊 Viewing service logs (Ctrl+C to exit)${NC}"
+        tail -f /tmp/service_manager.log
+        ;;
+    *)
+        echo "LiveKit + Pipecat Demo - Unified Control"
+        echo ""
+        echo "Usage: $0 {start|stop|restart|status|logs}"
+        echo ""
+        echo "Commands:"
+        echo "  start    - Start all services and monitor"
+        echo "  stop     - Stop all services"
+        echo "  restart  - Restart all services"
+        echo "  status   - Show service status"
+        echo "  logs     - View service logs"
+        echo ""
+        exit 1
+        ;;
+esac

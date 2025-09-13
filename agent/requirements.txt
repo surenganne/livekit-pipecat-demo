@@ -1,0 +1,20 @@
+# LiveKit Python SDK (compatible with Pipecat)
+livekit~=0.22.0
+
+# Pipecat framework (stable version) with Silero VAD, LiveKit, and Cartesia
+pipecat-ai[silero,livekit,cartesia]==0.0.84
+
+# AI Services
+openai>=1.0.0
+
+# Audio processing
+numpy
+scipy
+
+# Async and utilities
+python-dotenv
+websockets
+PyJWT
+
+# Logging and debugging
+loguru
