@@ -117,9 +117,29 @@ start_docker_services() {
         # Start all services defined in docker-compose.yml
         docker-compose up -d
         
-        # Wait for services to be ready
+        # Wait for services to be ready with health checks
         log "Waiting for services to be ready..."
-        sleep 7
+        sleep 5
+        
+        # Wait for LiveKit to be responsive with health checks
+        log "Checking LiveKit health..."
+        for i in {1..30}; do
+            if curl -s -f http://localhost:7880 >/dev/null 2>&1; then
+                log "LiveKit is responding to health checks ✅"
+                break
+            else
+                if [ $i -eq 30 ]; then
+                    error "LiveKit failed to become responsive after 30 attempts"
+                    docker-compose logs livekit --tail 20
+                    exit 1
+                fi
+                sleep 1
+            fi
+        done
+        
+        # Additional wait for full initialization
+        log "Allowing extra time for full LiveKit initialization..."
+        sleep 3
         
         # Verify both services are running
         livekit_running=$(docker-compose ps livekit | grep -q "Up" && echo "true" || echo "false")
@@ -243,19 +263,43 @@ show_status() {
     echo
 }
 
-# Function to stop all services
-stop_all() {
-    log "Stopping all services..."
+# Function to perform comprehensive cleanup to prevent duplicate identity issues
+cleanup_everything() {
+    log "🧹 Performing comprehensive cleanup to prevent duplicate identity issues..."
     
+    # 1. Stop all Python processes (agents, supervisors, HTTP server)
+    log "Stopping Python processes..."
     stop_process "supervisor.py" 15
     stop_process "spawn_agent.py" 10
     stop_process "python.*http.server.*8000" 5
     
-    cd "$PROJECT_DIR"
-    log "Stopping Docker services..."
-    docker-compose stop 2>/dev/null || true
+    # 2. Force kill any remaining agent processes
+    log "Force killing any remaining agent processes..."
+    pkill -9 -f "spawn_agent.py" 2>/dev/null || true
+    pkill -9 -f "supervisor.py" 2>/dev/null || true
     
-    log "All services stopped"
+    # 3. Stop and remove Docker containers with volumes to clear state
+    cd "$PROJECT_DIR"
+    log "Stopping and removing Docker containers with volumes..."
+    docker-compose down --volumes 2>/dev/null || true
+    
+    # 4. Clean up any orphaned Docker containers
+    log "Cleaning up orphaned containers..."
+    docker container prune -f 2>/dev/null || true
+    
+    # 5. Clear log files to start fresh
+    log "Clearing log files..."
+    rm -f /tmp/pipecat_agent.log /tmp/agent_supervisor.log /tmp/http_server.log
+    
+    # 6. Wait for cleanup to complete
+    sleep 2
+    
+    log "✅ Comprehensive cleanup completed - ready for fresh start"
+}
+
+# Function to stop all services
+stop_all() {
+    cleanup_everything
 }
 
 # Function to show logs
@@ -289,8 +333,17 @@ show_logs() {
 case "${1:-start}" in
     "start")
         log "🚀 Starting LiveKit + Pipecat Demo with Auto-Restart"
+        
+        # Always do cleanup before starting to prevent duplicate identity issues
+        cleanup_everything
+        
         check_prerequisites
         start_docker_services
+        
+        # Additional stabilization time for LiveKit/Redis integration
+        log "Allowing additional time for service stabilization..."
+        sleep 2
+        
         start_http_server
         start_supervised_agent
         show_status
@@ -323,9 +376,14 @@ case "${1:-start}" in
         start_supervised_agent
         ;;
     
+    "clean")
+        log "🧹 Manual cleanup requested"
+        cleanup_everything
+        log "🎉 Cleanup completed - ready for fresh start"
+        ;;
     
     *)
-        echo "Usage: $0 {start|stop|restart|status|logs|agent-only}"
+        echo "Usage: $0 {start|stop|restart|status|logs|agent-only|clean}"
         echo
         echo "Commands:"
         echo "  start      - Start all services (LiveKit, HTTP server, intelligent agent)"
@@ -334,6 +392,7 @@ case "${1:-start}" in
         echo "  status     - Show service status"
         echo "  logs <svc> - Show logs (agent, supervisor, http, livekit)"
         echo "  agent-only - Start only the supervised agent"
+        echo "  clean      - Comprehensive cleanup to prevent duplicate identity issues"
         echo
         exit 1
         ;;

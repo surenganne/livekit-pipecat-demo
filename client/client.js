@@ -958,6 +958,63 @@ class App {
                 }
                 this.updateUI(); // Update button states
                 break;
+            
+            case 'latency_update':
+                // Handle real-time latency measurements from IntelligentProcessor
+                if (data.latency_ms && data.latency_ms > 0) {
+                    const latency = Math.round(data.latency_ms);
+                    
+                    console.log(`📊 Real-time latency measurement: ${latency}ms`);
+                    
+                    // Store the measurement
+                    this.latencyMeasurements.push(latency);
+                    
+                    // Keep only last 20 measurements
+                    if (this.latencyMeasurements.length > 20) {
+                        this.latencyMeasurements.shift();
+                    }
+                    
+                    // Calculate running average
+                    const avgLatency = Math.round(
+                        this.latencyMeasurements.reduce((a, b) => a + b, 0) / this.latencyMeasurements.length
+                    );
+                    
+                    this.log(`📊 Latency: ${latency}ms (avg: ${avgLatency}ms from ${this.latencyMeasurements.length} measurements)`, 'info');
+                    
+                    // Update latency display
+                    if (this.elements.latencyValue) {
+                        this.elements.latencyValue.textContent = `${latency}`;
+                        
+                        // Color code based on latency
+                        if (latency < 300) {
+                            this.elements.latencyValue.style.color = '#38a169'; // Green
+                        } else if (latency < 600) {
+                            this.elements.latencyValue.style.color = '#d69e2e'; // Yellow
+                        } else {
+                            this.elements.latencyValue.style.color = '#e53e3e'; // Red
+                        }
+                    }
+                    
+                    // Update average latency display
+                    if (this.elements.avgLatencyValue) {
+                        this.elements.avgLatencyValue.textContent = `${avgLatency}`;
+                        
+                        // Color code the average
+                        if (avgLatency < 300) {
+                            this.elements.avgLatencyValue.style.color = '#38a169'; // Green
+                        } else if (avgLatency < 600) {
+                            this.elements.avgLatencyValue.style.color = '#d69e2e'; // Yellow
+                        } else {
+                            this.elements.avgLatencyValue.style.color = '#e53e3e'; // Red
+                        }
+                    }
+                    
+                    // Show detailed statistics every few measurements
+                    if (this.latencyMeasurements.length % 5 === 0) {
+                        this.showLatencyStatistics();
+                    }
+                }
+                break;
 
             default:
                 console.log(`🔍 Unknown agent data type: ${data.type}`, data);
