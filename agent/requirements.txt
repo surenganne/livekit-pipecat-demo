@@ -4,8 +4,8 @@ livekit~=0.22.0
 # Pipecat framework (stable version) with Silero VAD, LiveKit, and Cartesia
 pipecat-ai[silero,livekit,cartesia]==0.0.84
 
-# AI Services
-openai>=1.0.0
+# AI Services - OpenAI for STT, TTS and LLM responses
+openai>=1.35.0
 
 # Audio processing
 numpy

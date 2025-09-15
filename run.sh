@@ -97,27 +97,53 @@ check_prerequisites() {
     log "Prerequisites check passed ✅"
 }
 
-# Function to start LiveKit server
-start_livekit() {
-    log "Checking LiveKit server..."
+# Function to start Docker services (LiveKit + Redis)
+start_docker_services() {
+    log "Checking Docker services (LiveKit + Redis)..."
     
     cd "$PROJECT_DIR"
     
-    # Check if LiveKit is already running
-    if docker-compose ps livekit | grep -q "Up"; then
-        log "LiveKit server is already running ✅"
+    # Check if both services are running
+    livekit_running=$(docker-compose ps livekit | grep -q "Up" && echo "true" || echo "false")
+    redis_running=$(docker-compose ps redis | grep -q "Up" && echo "true" || echo "false")
+    
+    if [ "$livekit_running" = "true" ] && [ "$redis_running" = "true" ]; then
+        log "Docker services already running ✅"
+        log "  - LiveKit: Running ✅"
+        log "  - Redis: Running ✅"
     else
-        log "Starting LiveKit server..."
-        docker-compose up -d livekit
+        log "Starting Docker services (LiveKit + Redis)..."
         
-        # Wait for LiveKit to be ready
-        log "Waiting for LiveKit to be ready..."
-        sleep 5
+        # Start all services defined in docker-compose.yml
+        docker-compose up -d
         
-        if docker-compose ps livekit | grep -q "Up"; then
-            log "LiveKit server started ✅"
+        # Wait for services to be ready
+        log "Waiting for services to be ready..."
+        sleep 7
+        
+        # Verify both services are running
+        livekit_running=$(docker-compose ps livekit | grep -q "Up" && echo "true" || echo "false")
+        redis_running=$(docker-compose ps redis | grep -q "Up" && echo "true" || echo "false")
+        
+        if [ "$livekit_running" = "true" ] && [ "$redis_running" = "true" ]; then
+            log "Docker services started successfully ✅"
+            log "  - LiveKit: Running on ports 7880-7881 ✅"
+            log "  - Redis: Running on port 6379 ✅"
         else
-            error "Failed to start LiveKit server"
+            error "Failed to start Docker services:"
+            if [ "$livekit_running" = "false" ]; then
+                error "  - LiveKit: Failed ❌"
+            fi
+            if [ "$redis_running" = "false" ]; then
+                error "  - Redis: Failed ❌"
+            fi
+            
+            log "Docker service status:"
+            docker-compose ps
+            
+            log "Docker logs:"
+            docker-compose logs --tail 10
+            
             exit 1
         fi
     fi
@@ -147,6 +173,8 @@ start_http_server() {
 
 # Function to start supervised agent
 start_supervised_agent() {
+    local mode=${1:-normal}
+    
     log "Starting supervised Pipecat agent..."
     
     # Stop any existing agents
@@ -175,11 +203,20 @@ show_status() {
     echo
     log "=== SERVICE STATUS ==="
     
+    cd "$PROJECT_DIR"
+    
     # LiveKit status
     if docker-compose ps livekit | grep -q "Up"; then
         echo -e "LiveKit Server: ${GREEN}Running ✅${NC}"
     else
         echo -e "LiveKit Server: ${RED}Stopped ❌${NC}"
+    fi
+    
+    # Redis status
+    if docker-compose ps redis | grep -q "Up"; then
+        echo -e "Redis Server:   ${GREEN}Running ✅${NC}"
+    else
+        echo -e "Redis Server:   ${RED}Stopped ❌${NC}"
     fi
     
     # HTTP server status
@@ -198,9 +235,9 @@ show_status() {
     
     # Agent status
     if is_running "spawn_agent.py"; then
-        echo -e "Pipecat Agent:  ${GREEN}Running ✅${NC}"
+        echo -e "Intelligent Agent: ${GREEN}Running ✅${NC}"
     else
-        echo -e "Pipecat Agent:  ${RED}Stopped ❌${NC}"
+        echo -e "Intelligent Agent: ${RED}Stopped ❌${NC}"
     fi
     
     echo
@@ -215,7 +252,8 @@ stop_all() {
     stop_process "python.*http.server.*8000" 5
     
     cd "$PROJECT_DIR"
-    docker-compose stop livekit 2>/dev/null || true
+    log "Stopping Docker services..."
+    docker-compose stop 2>/dev/null || true
     
     log "All services stopped"
 }
@@ -237,8 +275,12 @@ show_logs() {
             cd "$PROJECT_DIR"
             docker-compose logs -f livekit
             ;;
+        "redis")
+            cd "$PROJECT_DIR"
+            docker-compose logs -f redis
+            ;;
         *)
-            echo "Available logs: agent, supervisor, http, livekit"
+            echo "Available logs: agent, supervisor, http, livekit, redis"
             ;;
     esac
 }
@@ -248,13 +290,13 @@ case "${1:-start}" in
     "start")
         log "🚀 Starting LiveKit + Pipecat Demo with Auto-Restart"
         check_prerequisites
-        start_livekit
+        start_docker_services
         start_http_server
         start_supervised_agent
         show_status
         log "🎉 All services started successfully!"
-        log "💡 Use './start_agent.sh status' to check service status"
-        log "💡 Use './start_agent.sh logs agent' to view agent logs"
+        log "💡 Use './run.sh status' to check service status"
+        log "💡 Use './run.sh logs agent' to view agent logs"
         ;;
     
     "stop")
@@ -281,16 +323,17 @@ case "${1:-start}" in
         start_supervised_agent
         ;;
     
+    
     *)
         echo "Usage: $0 {start|stop|restart|status|logs|agent-only}"
         echo
         echo "Commands:"
-        echo "  start       - Start all services (LiveKit, HTTP server, supervised agent)"
-        echo "  stop        - Stop all services"
-        echo "  restart     - Restart all services"
-        echo "  status      - Show service status"
-        echo "  logs <svc>  - Show logs (agent, supervisor, http, livekit)"
-        echo "  agent-only  - Start only the supervised agent"
+        echo "  start      - Start all services (LiveKit, HTTP server, intelligent agent)"
+        echo "  stop       - Stop all services"
+        echo "  restart    - Restart all services"
+        echo "  status     - Show service status"
+        echo "  logs <svc> - Show logs (agent, supervisor, http, livekit)"
+        echo "  agent-only - Start only the supervised agent"
         echo
         exit 1
         ;;

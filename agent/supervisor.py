@@ -159,6 +159,26 @@ class AgentSupervisor:
             logger.error(f"❌ Maximum restarts ({self.max_restarts}) reached. Stopping supervisor.")
             return False
         
+        # Emergency cleanup of any stale LiveKit connections
+        try:
+            logger.info("🧹 Performing emergency cleanup of LiveKit connections...")
+            import sys
+            sys.path.append(str(Path(__file__).parent))
+            from connection_manager import connection_manager
+            
+            # Run emergency cleanup in a new event loop (since supervisor runs sync)
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            loop.run_until_complete(connection_manager.emergency_cleanup())
+            logger.info("✅ Emergency cleanup completed")
+        except Exception as e:
+            logger.warning(f"⚠️ Emergency cleanup failed: {e}")
+        
         # Stop current agent
         if self.agent_process:
             try:

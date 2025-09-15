@@ -67,13 +67,19 @@ except ImportError as e:
 
 
 def generate_access_token():
-    """Generate a LiveKit access token for the agent"""
+    """Generate a LiveKit access token for the agent with unique identity"""
     from livekit import api
-
-    # Create access token
+    from connection_manager import connection_manager
+    
+    # Use connection manager to generate truly unique identity
+    unique_identity = connection_manager.generate_unique_identity("PipecatAgent")
+    
+    logger.info(f"🆔 Generating token for unique agent identity: {unique_identity}")
+    
+    # Create access token with unique identity
     token = api.AccessToken(config.LIVEKIT_API_KEY, config.LIVEKIT_API_SECRET) \
-        .with_identity(config.AGENT_NAME) \
-        .with_name(config.AGENT_NAME) \
+        .with_identity(unique_identity) \
+        .with_name(unique_identity) \
         .with_grants(api.VideoGrants(
             room_join=True,
             room=config.ROOM_NAME,
@@ -81,7 +87,7 @@ def generate_access_token():
             can_subscribe=True
         ))
 
-    return token.to_jwt()
+    return token.to_jwt(), unique_identity
 
 
 class DummyTTSService(FrameProcessor):
@@ -118,86 +124,84 @@ class DebuggingTTSService(OpenAITTSService):
         logger.debug(f"🎵 TTS Service received frame: {frame_type}")
         
         if isinstance(frame, TextFrame):
-            logger.info(f"🎵 TTS processing TextFrame: '{frame.text}' (length: {len(frame.text)})")
+            logger.info(f"🔊 TTS Processing: '{frame.text}' (length: {len(frame.text)})")
             logger.debug(f"🔍 Frame direction: {direction}")
-            logger.debug(f"🔍 _aggregate_sentences: {self._aggregate_sentences}")
         
         try:
             # Call the parent process_frame method
             result = await super().process_frame(frame, direction)
             
             if isinstance(frame, TextFrame):
-                logger.info(f"🎵 TTS completed processing TextFrame: '{frame.text}'")
+                logger.info(f"✅ TTS completed processing: '{frame.text}'")
             
             return result
         except Exception as e:
             if isinstance(frame, TextFrame):
-                logger.error(f"❌ TTS process_frame failed for TextFrame: '{frame.text}' - {e}")
+                logger.error(f"❌ TTS process_frame failed for: '{frame.text}' - {e}")
             else:
                 logger.error(f"❌ TTS process_frame failed for {frame_type} - {e}")
             raise
     
-    async def _process_text_frame(self, frame: TextFrame):
-        """Override _process_text_frame to add debugging"""
-        logger.debug(f"🔍 _process_text_frame called with: '{frame.text}'")
-        logger.debug(f"🔍 _aggregate_sentences: {self._aggregate_sentences}")
-        
-        text = None
-        if not self._aggregate_sentences:
-            text = frame.text
-            logger.debug(f"🔍 Direct text assignment: '{text}'")
-        else:
-            text = await self._text_aggregator.aggregate(frame.text)
-            logger.debug(f"🔍 Aggregated text: '{text}'")
-        
-        logger.debug(f"🔍 Final text for TTS: '{text}'")
-        if text:
-            logger.info(f"🎵 Calling _push_tts_frames with: '{text}'")
-            await self._push_tts_frames(text)
-        else:
-            logger.warning(f"⚠️ Text is empty, not calling _push_tts_frames")
-    
     async def _push_tts_frames(self, text: str):
         """Override _push_tts_frames to add debugging"""
-        logger.info(f"🎵 _push_tts_frames called with: '{text}' (length: {len(text)})")
+        logger.info(f"🎤➡️🔊 TTS generating audio for: '{text}' (length: {len(text)})")
         
-        # Call parent method
-        await super()._push_tts_frames(text)
-    
-    async def run_tts(self, text: str):
-        """Override run_tts to add debugging"""
-        logger.info(f"🎵 TTS run_tts called with text: '{text}' (length: {len(text)})")
         try:
-            result = super().run_tts(text)  # This returns an async generator
-            logger.info(f"🎵 TTS run_tts returned generator successfully")
-            return result
+            # Call parent method which handles the async generator properly
+            await super()._push_tts_frames(text)
+            logger.info(f"🔊✅ TTS audio generation completed for: '{text[:50]}...'")
         except Exception as e:
-            logger.error(f"❌ TTS run_tts failed: {e}")
+            logger.error(f"❌ TTS _push_tts_frames failed for '{text}': {e}")
             raise
 
 
-class EchoProcessor(FrameProcessor):
-    """Simple processor that adds 'got it' to user input"""
+class IntelligentProcessor(FrameProcessor):
+    """Intelligent processor that uses OpenAI to generate contextual responses"""
 
     def __init__(self):
         super().__init__()
-        self.response_suffix = config.ECHO_SUFFIX
         self.speech_start_time = None
-        self.waiting_for_tts_audio = False  # Flag to know when we're expecting TTS audio
-        self.tts_text_sent = None  # Track what text was sent to TTS
-        self.latency_measurements = []  # Store latency measurements
-        self.max_measurements = 20  # Keep last 20 measurements for averaging
+        self.waiting_for_tts_audio = False
+        self.tts_text_sent = None
+        self.latency_measurements = []
+        self.max_measurements = 20
+        
+        # Initialize OpenAI client for real LLM responses
+        import openai
+        self.openai_client = openai.OpenAI(
+            api_key=config.OPENAI_API_KEY,
+            timeout=8.0  # Reasonable timeout for quality responses
+        )
+        
+        # Conversation history for context
+        self.conversation_history = [
+            {"role": "system", "content": "You are a helpful AI assistant. Provide natural, conversational responses. Be informative and engaging while keeping responses reasonably concise."}
+        ]
+        
+        logger.info("🧠 IntelligentProcessor initialized with real OpenAI GPT-3.5-turbo")
 
 
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames"""
-        # Log important frames only (not continuous audio frames)
+        # Log important frames to debug audio flow
         frame_type = frame.__class__.__name__
+        
+        # Log ALL frame types for debugging
         if frame_type not in ['UserAudioRawFrame', 'AudioRawFrame']:
-            logger.debug(f"🔄 EchoProcessor received: {frame_type}")
+            logger.info(f"🔄 IntelligentProcessor received: {frame_type}")
+        elif frame_type == 'UserAudioRawFrame':
+            # Log every user audio frame with more details
+            if hasattr(frame, 'audio') and frame.audio:
+                logger.info(f"🎤🔊 User audio frame: {len(frame.audio)} bytes, sample_rate: {getattr(frame, 'sample_rate', 'unknown')}")
+            else:
+                logger.info(f"🎤⚠️ User audio frame with no audio data")
         elif frame_type == 'AudioRawFrame':
-            logger.debug(f"🎵 AudioRawFrame received in EchoProcessor")
+            # More detailed logging for audio frames
+            if hasattr(frame, 'audio') and frame.audio:
+                logger.info(f"🎵 AudioRawFrame: {len(frame.audio)} bytes, direction: {direction}")
+            else:
+                logger.debug(f"🎵 Empty AudioRawFrame, direction: {direction}")
 
         # Let parent handle the frame first (including StartFrame validation)
         await super().process_frame(frame, direction)
@@ -219,7 +223,7 @@ class EchoProcessor(FrameProcessor):
         # Process text input from STT
         if isinstance(frame, TextFrame):
             user_text = frame.text.strip()
-            logger.info(f"📝 Received TextFrame: '{user_text}' (length: {len(user_text)})")
+            logger.info(f"🎤📝 USER SPOKE: '{user_text}' (length: {len(user_text)})")
 
             if user_text:
                 # Calculate latency if we have a start time
@@ -227,30 +231,24 @@ class EchoProcessor(FrameProcessor):
                     latency_ms = (time.time() - self.speech_start_time) * 1000
                     logger.info(f"⏱️  STT Latency: {latency_ms:.1f}ms")
 
-                # Create response with suffix - remove problematic punctuation for TTS
-                # Replace sentence-ending punctuation to avoid TTS splitting
-                clean_text = user_text.replace('?', '').replace('!', '').replace('.', '')
-                response_text = f"{clean_text} got it"
-                logger.info(f"💬 User: '{user_text}' -> Agent: '{response_text}'")
-
-                # Send text to TTS service for speech synthesis
-                logger.info(f"🎵 Sending to TTS: '{response_text}' (length: {len(response_text)})")
-                logger.debug(f"🔍 About to create TextFrame with text: '{response_text}'")
+                # Generate intelligent response using OpenAI
+                response_text = await self.generate_response(user_text)
+                
+                logger.info(f"👥 USER INPUT: '{user_text}'")
+                logger.info(f"🤖 AGENT RESPONSE: '{response_text}'")
+                logger.info(f"🎵 SENDING TO TTS: '{response_text}' (length: {len(response_text)})")
 
                 # Create TextFrame and send to TTS pipeline
                 response_frame = TextFrame(response_text)
-                logger.debug(f"🔍 TextFrame created: {type(response_frame)} with text: '{response_frame.text}'")
+                logger.info(f"📝 TTS TextFrame content: '{response_frame.text}'")
                 
                 # Mark that we're waiting for TTS audio generation
                 self.waiting_for_tts_audio = True
                 self.tts_text_sent = response_text
-                logger.info(f"🎙️ Now waiting for TTS audio for: '{response_text}'")
+                logger.info(f"⏳ WAITING FOR TTS AUDIO: '{response_text}'")
                 
                 await self.push_frame(response_frame, FrameDirection.DOWNSTREAM)
-                logger.info(f"✅ TextFrame sent to TTS pipeline (frame id: {id(response_frame)})")
-                logger.debug(f"🔍 Frame pushed downstream to TTS service")
-
-                # Note: Latency will be measured when TTS completes audio generation
+                logger.info(f"✅ TTS FRAME SENT: '{response_text}'")
                 # The TextFrame is now sent to TTS service for speech synthesis
             else:
                 # Handle empty input
@@ -358,11 +356,61 @@ class EchoProcessor(FrameProcessor):
                 logger.info(f"🔄 Sent as TextFrame fallback")
             except Exception as fallback_error:
                 logger.error(f"❌ Fallback also failed: {fallback_error}")
+    
+    async def generate_response(self, user_text: str) -> str:
+        """Generate intelligent response using OpenAI GPT-3.5-turbo"""
+        try:
+            logger.info(f"🧠 Generating intelligent response for: '{user_text}'")
+            start_time = time.time()
+            
+            # Add user message to conversation history
+            self.conversation_history.append({"role": "user", "content": user_text})
+            
+            # Keep conversation history manageable (last 6 messages)
+            if len(self.conversation_history) > 7:  # 1 system + 6 messages
+                self.conversation_history = [self.conversation_history[0]] + self.conversation_history[-6:]
+            
+            # Generate intelligent response using OpenAI
+            response = self.openai_client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=self.conversation_history,
+                max_tokens=150,  # Allow for complete, helpful responses
+                temperature=0.7,  # Natural conversation
+                timeout=8.0  # Reasonable timeout for quality
+            )
+            
+            llm_time = (time.time() - start_time) * 1000
+            logger.info(f"⚡ OpenAI LLM response time: {llm_time:.1f}ms")
+            
+            response_text = response.choices[0].message.content.strip()
+            
+            # Add assistant response to conversation history
+            self.conversation_history.append({"role": "assistant", "content": response_text})
+            
+            # Clean up response for TTS (remove quotes that might cause issues)
+            response_text = response_text.replace('"', '').replace("'", "")
+            
+            logger.info(f"💬 Generated intelligent response: '{response_text}'")
+            return response_text
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to generate OpenAI response: {e}")
+            # Intelligent fallback based on user input
+            if "weather" in user_text.lower():
+                return "I don't have access to current weather data. You can check a weather app or website for accurate forecasts."
+            elif "joke" in user_text.lower():
+                return "Here's one: Why don't scientists trust atoms? Because they make up everything!"
+            elif "help" in user_text.lower():
+                return "I'm here to help! I can answer questions, have conversations, explain topics, or assist with various tasks. What would you like to know?"
+            else:
+                return f"That's interesting! I'd be happy to discuss {user_text} with you. Could you tell me more about what specifically interests you?"
 
 
 async def main():
     """Main function to start the agent"""
     logger.info("🤖 Starting LiveKit + Pipecat Demo Agent")
+    
+    from connection_manager import connection_manager
 
     # Validate configuration
     if not config.OPENAI_API_KEY or config.OPENAI_API_KEY == "your-openai-api-key":
@@ -373,59 +421,109 @@ async def main():
         logger.error("❌ Please set your LiveKit credentials in config.py")
         return
 
+    transport = None
+    unique_identity = None
+    
     try:
-        # Generate access token
-        token = generate_access_token()
-
-        # Initialize transport with VAD
+        # Clean up any stale connections first
+        await connection_manager.cleanup_stale_connections()
+        
+        # Generate access token with unique identity
+        token, unique_identity = generate_access_token()
+        
+        logger.info(f"🔗 Connecting with identity: {unique_identity}")
+        
+        # Initialize transport with VAD and unique identity
         transport = LiveKitTransport(
             url=config.LIVEKIT_URL,
             token=token,
             room_name=config.ROOM_NAME,
             params=LiveKitParams(
-                participant_name=config.AGENT_NAME,
+                participant_name=unique_identity,  # Use unique identity
                 audio_in_enabled=True,
                 audio_out_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(
                     params=VADParams(
-                        stop_secs=1.5,   # Wait longer before considering speech ended (allows natural pauses)
-                        start_secs=0.3,   # Slightly longer to avoid false starts
-                        min_volume=0.6    # Lower threshold for voice detection
+                        stop_secs=0.5,   # Faster speech completion detection  
+                        start_secs=0.01,  # Ultra-fast speech detection
+                        min_volume=0.01,  # Extremely sensitive volume detection
+                        confidence=0.3    # Very low confidence threshold
                     )
                 ),
             )
         )
+        
+        # Register the transport with connection manager
+        connection_manager.register_connection(unique_identity, transport)
 
-        # Initialize STT service
-        stt = OpenAISTTService(
+        # Initialize STT service with detailed debugging
+        logger.info("🎤 Initializing OpenAI STT service with debugging...")
+        
+        class DebuggingSTTService(OpenAISTTService):
+            """STT service wrapper with debug logging"""
+            
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                """Override process_frame to add debugging"""
+                frame_type = frame.__class__.__name__
+                
+                if frame_type == 'UserAudioRawFrame' and hasattr(frame, 'audio'):
+                    logger.info(f"📝 STT received UserAudioRawFrame: {len(frame.audio)} bytes")
+                    
+                    # Check if audio has any volume/content
+                    import numpy as np
+                    try:
+                        # Convert audio bytes to numpy array for analysis
+                        audio_data = np.frombuffer(frame.audio, dtype=np.int16)
+                        volume_level = np.sqrt(np.mean(audio_data**2))
+                        max_amplitude = np.max(np.abs(audio_data))
+                        logger.info(f"📊 Audio analysis: volume_level={volume_level:.1f}, max_amplitude={max_amplitude}, samples={len(audio_data)}")
+                        
+                        # Check if audio is likely speech (lowered threshold for low-volume mics)
+                        if volume_level > 0.3:  # Very low threshold for quiet microphones
+                            logger.info(f"🎤✅ Audio detected: volume={volume_level:.1f}, amplitude={max_amplitude}")
+                        else:
+                            logger.warning(f"🎤⚠️ Audio volume extremely low: {volume_level:.1f}")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ Audio analysis failed: {e}")
+                
+                elif isinstance(frame, TextFrame):
+                    logger.info(f"📝✅ STT produced TextFrame: '{frame.text}' (length: {len(frame.text)})")
+                
+                try:
+                    # Call parent process_frame
+                    result = await super().process_frame(frame, direction)
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ STT process_frame failed: {e}")
+                    raise
+        
+        stt = DebuggingSTTService(
             api_key=config.OPENAI_API_KEY,
             model="whisper-1",
         )
+        logger.info("✅ OpenAI STT service initialized with debugging")
 
-        # Initialize OpenAI TTS service (fixed configuration)
-        logger.info("🎤 Initializing OpenAI TTS service")
-        try:
-            tts = OpenAITTSService(
-                api_key=config.OPENAI_API_KEY,
-                voice="alloy",  # Clear, natural voice
-                model="tts-1",  # Explicitly specify model
-                aggregate_sentences=False,  # CRITICAL: Disable sentence aggregation for direct text
-            )
-            logger.info("✅ OpenAI TTS service initialized successfully")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize OpenAI TTS service: {e}")
-            raise
+        # Initialize OpenAI TTS service for reliable, complete audio
+        logger.info("🎤 Initializing OpenAI TTS service for reliable audio...")
+        tts = DebuggingTTSService(
+            api_key=config.OPENAI_API_KEY,
+            voice="alloy",  # Clear, natural voice
+            model="tts-1",  # Reliable model with good quality
+            aggregate_sentences=False  # Process text directly without aggregation
+        )
+        logger.info("✅ OpenAI TTS service initialized - reliable complete audio with debugging")
 
-        # Initialize our echo processor
-        echo_processor = EchoProcessor()
+        # Initialize our intelligent processor
+        intelligent_processor = IntelligentProcessor()
 
-        # Create pipeline with TTS service
+        # Create pipeline with intelligent processor
         pipeline = Pipeline([
-            transport.input(),   # Audio input from LiveKit
-            stt,                # Speech to text
-            echo_processor,     # Our echo logic (generates TextFrames)
-            tts,                # Text to speech (OpenAI)
-            transport.output(), # Audio output to LiveKit
+            transport.input(),       # Audio input from LiveKit
+            stt,                    # Speech to text (Whisper)
+            intelligent_processor,   # Our intelligent AI processor
+            tts,                    # Text to speech (Cartesia/OpenAI)
+            transport.output(),     # Audio output to LiveKit
         ])
 
         logger.info("🔗 Pipeline created successfully")
@@ -433,8 +531,10 @@ async def main():
         # Create and run the task
         task = PipelineTask(pipeline)
 
-        logger.info(f"🚀 Agent connecting to room: {config.ROOM_NAME}")
-        logger.info("💬 Ready to receive audio and respond with echo + 'got it'")
+        logger.info(f"🚀 Agent connecting to room: {config.ROOM_NAME} as {unique_identity}")
+        logger.info("🧠 Ready for intelligent conversation with OpenAI GPT-3.5-turbo")
+        logger.info("🎵 Using OpenAI TTS for reliable, complete audio responses")
+        logger.info("🎯 Target: Intelligent responses with complete audio playback")
 
         # Run the pipeline
         runner = PipelineRunner()
@@ -442,11 +542,42 @@ async def main():
 
     except KeyboardInterrupt:
         logger.info("👋 Agent stopped by user")
+        await cleanup_transport(transport, unique_identity)
     except Exception as e:
         logger.error(f"❌ Agent failed: {e}")
         import traceback
         traceback.print_exc()
+        await cleanup_transport(transport, unique_identity)
         sys.exit(1)
+
+
+async def cleanup_transport(transport, unique_identity=None):
+    """Clean up LiveKit transport connection"""
+    from connection_manager import connection_manager
+    
+    if transport:
+        try:
+            logger.info("🧹 Cleaning up LiveKit transport...")
+            
+            # Unregister from connection manager first
+            if unique_identity:
+                connection_manager.unregister_connection(unique_identity)
+            
+            # Disconnect from room
+            if hasattr(transport, 'disconnect'):
+                await transport.disconnect()
+            
+            logger.info("✅ Transport cleanup completed")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Transport cleanup failed: {e}")
+            
+            # Emergency cleanup if normal cleanup fails
+            if unique_identity:
+                try:
+                    await connection_manager.force_disconnect(unique_identity)
+                except Exception as cleanup_error:
+                    logger.error(f"❌ Emergency cleanup failed: {cleanup_error}")
 
 
 if __name__ == "__main__":
